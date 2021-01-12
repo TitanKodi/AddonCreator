@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.mimediacenter"
+	name="Mi media center"
+	version="1.0.8"
+	provider-name="tvalacarta">
+  <requires>
+    <!-- <import addon="xbmc.python" version="2.0"/> -->
+    <import addon="plugin.video.youtube" version="3.0.0"/>
+    <import addon="script.module.six" />
+  </requires>
+  <extension point="xbmc.python.pluginsource" library="default.py">
+    <provides>video</provides>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary>Mi media center</summary>
+    <description>Ideas para llevar la experiencia multimedia al salón</description>
+    <platform>all</platform>
+    <assets>
+        <icon>icon.png</icon>
+        <fanart>fanart.jpg</fanart>
+    </assets>
+  </extension>
+</addon>
