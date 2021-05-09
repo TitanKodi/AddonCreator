@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #---------------------------------------------------------------------------
-# Plugin Tools v1.0.9
+# Plugin Tools v1.0.10
 #---------------------------------------------------------------------------
 # License: GPL (http://www.gnu.org/licenses/gpl-3.0.html)
 # Based on code from youtube, parsedom and pelisalacarta addons
@@ -8,6 +8,9 @@
 # Jesús
 # tvalacarta@gmail.com
 # http://www.mimediacenter.info/plugintools
+#---------------------------------------------------------------------------
+# Currently maintained by Titán
+# https://github.com/TitanKodi/Plugintools
 #---------------------------------------------------------------------------
 # Changelog:
 # 1.0.0
@@ -37,8 +40,12 @@
 # - Added selector
 # 1.0.9
 # - Welcome Matrix
+# 1.0.10
+# - Added support to params encoded on base64
+# - Added the possibility to add extra params to the add_item function
 #---------------------------------------------------------------------------
 
+import base64
 import xbmc
 import xbmcplugin
 import xbmcaddon
@@ -50,11 +57,13 @@ import time
 import socket
 from io import BytesIO
 import gzip
+import six
 from six.moves import urllib_request
-from six.moves.urllib.parse import unquote_plus, quote_plus
+from six.moves.urllib.parse import unquote_plus, quote_plus, urlencode
 module_log_enabled = False
 http_debug_log_enabled = False
-
+if six.PY3:
+    unicode = str
 LIST = "list"
 THUMBNAIL = "thumbnail"
 MOVIES = "movies"
@@ -62,7 +71,7 @@ TV_SHOWS = "tvshows"
 SEASONS = "seasons"
 EPISODES = "episodes"
 OTHER = "other"
-
+b64 = False
 # Suggested view codes for each type from different skins (initial list thanks to xbmcswift2 library)
 ALL_VIEW_CODES = {
     'list': {
@@ -111,21 +120,30 @@ ALL_VIEW_CODES = {
 
 # Write something on XBMC log
 def log(message):
-    xbmc.log(message)
+    if not isinstance(message, str): 
+        try:
+            message = str(message)
+        except: return
+    xbmc.log("[%s] - %s"% (xbmcaddon.Addon().getAddonInfo('id'), message), xbmc.LOGINFO)
 
 # Write this module messages on XBMC log
 def _log(message):
     if module_log_enabled:
-        xbmc.log("plugintools."+message)
+        xbmc.log("%s plugintools.%s"% (xbmcaddon.Addon().getAddonInfo('id'), message), xbmc.LOGINFO)
 
-# Parse XBMC params - based on script.module.parsedom addon    
+# Parse XBMC params - based on script.module.parsedom addon & modified by Titán
 def get_params():
     _log("get_params")
-    
+
     param_string = sys.argv[2]
-    
-    _log("get_params "+str(param_string))
-    
+
+    if b64 or '%3D' in str(param_string) or not '&' in str(param_string) or not '=' in str(param_string):
+        try:
+            if '?' in str(param_string): param_string = param_string.split('?')[1]
+            param_string = six.ensure_text(base64.b64decode(six.ensure_binary(unquote_plus(param_string))))
+        except:
+            _log("Error, base64 can´t be decoded")
+
     commands = {}
 
     if param_string:
@@ -159,8 +177,6 @@ def read(url):
 def read_body_and_headers(url, post=None, headers=[], follow_redirects=False, timeout=None):
     xbmc.log("read_body_and_headers "+url, 2)
 
-    if post is not None:
-        _log("read_body_and_headers post="+post)
 
     if len(headers)==0:
         headers.append(["User-Agent","Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:18.0) Gecko/20100101 Firefox/18.0"])
@@ -252,8 +268,10 @@ def read_body_and_headers(url, post=None, headers=[], follow_redirects=False, ti
 
     # Diccionario para las cabeceras
     txheaders = {}
-
-    # Construye el request
+    if type(post) == dict: post = urlencode(post)
+    if post:
+        if isinstance(post, unicode):
+            post = post.encode('utf-8', 'strict')
     if post is None:
         _log("read_body_and_headers GET request")
     else:
@@ -265,7 +283,8 @@ def read_body_and_headers(url, post=None, headers=[], follow_redirects=False, ti
         _log("read_body_and_headers header %s=%s" % (str(header[0]),str(header[1])) )
         txheaders[header[0]]=header[1]
     _log("read_body_and_headers ---------------------------")
-
+    if post and six.PY3:
+        post = six.ensure_binary(post)
     req = Request(url, post, txheaders)
     if timeout is None:
         handle=urlopen(req)
@@ -324,7 +343,9 @@ def read_body_and_headers(url, post=None, headers=[], follow_redirects=False, ti
     fin = time.time()
     _log("read_body_and_headers Downloaded in %d seconds " % (fin-inicio+1))
     if not isinstance(data, str):
-        data = data.decode("utf-8", "strict")
+        try:
+            data = data.decode("utf-8", "strict")
+        except: data = str(data)    
     return data,returnheaders
 
 class NoRedirectHandler(urllib_request.HTTPRedirectHandler):
@@ -363,34 +384,34 @@ def find_single_match(text,pattern):
 
     return result
 
-def add_item( action="" , title="" , plot="" , url="" , thumbnail="" , fanart="" , show="" , episode="" , extra="", page="", info_labels = None, isPlayable = False , folder=True ):
-    _log("add_item action=["+action+"] title=["+title+"] url=["+url+"] thumbnail=["+thumbnail+"] fanart=["+fanart+"] show=["+show+"] episode=["+episode+"] extra=["+extra+"] page=["+page+"] isPlayable=["+str(isPlayable)+"] folder=["+str(folder)+"]")
-
-    listitem = xbmcgui.ListItem(title)
+def add_item(**kwargs):
+    listitem = xbmcgui.ListItem(kwargs.get('title'))
     listitem.setArt({'poster': 'poster.png', 'banner': 'banner.png'})
-    listitem.setArt({'icon': thumbnail, 'thumb': thumbnail, 'poster': thumbnail,
-                    'fanart': fanart})
+    listitem.setArt({'icon': kwargs.get('thumbnail'), 'thumb': kwargs.get('thumbnail'), 'poster': kwargs.get('thumbnail'),
+                    'fanart': kwargs.get('fanart')})
+
+    info_labels = kwargs.get('info_labels') if 'info_labels' in kwargs else None
+
     if info_labels is None:
-        info_labels = { "Title" : title, "FileName" : title, "Plot" : plot }
+        info_labels = { "Title" : kwargs.get('title'), "FileName" : kwargs.get('title'), "Plot" : kwargs.get('plot'), "Genre": kwargs.get('genre'), "dateadded": kwargs.get('genre'), "credits": kwargs.get('credits') }
+
     listitem.setInfo( "video", info_labels )
 
-    if fanart!="":
-        listitem.setProperty('fanart_image',fanart)
-        xbmcplugin.setPluginFanart(int(sys.argv[1]), fanart)
-    
-    if url.startswith("plugin://"):
-        itemurl = url
+    if kwargs.get('fanart') and kwargs.get('fanart') !="":
+        listitem.setProperty('fanart_image',kwargs.get('fanart'))
+        xbmcplugin.setPluginFanart(int(sys.argv[1]), kwargs.get('fanart'))
+
+    if kwargs.get('url') and kwargs.get('url').startswith("plugin://"):
+        itemurl = kwargs.get('url')
         listitem.setProperty('IsPlayable', 'true')
-        xbmcplugin.addDirectoryItem( handle=int(sys.argv[1]), url=itemurl, listitem=listitem, isFolder=folder)
-    elif isPlayable:
+    elif kwargs.get('isPlayable'):
         listitem.setProperty("Video", "true")
         listitem.setProperty('IsPlayable', 'true')
-        itemurl = '%s?action=%s&title=%s&url=%s&thumbnail=%s&plot=%s&extra=%s&page=%s' % ( sys.argv[ 0 ] , action , quote_plus( title ) , quote_plus(url) , quote_plus( thumbnail ) , quote_plus( plot ) , quote_plus( extra ) , quote_plus( page ))
-        xbmcplugin.addDirectoryItem( handle=int(sys.argv[1]), url=itemurl, listitem=listitem, isFolder=folder)
-    else:
-        itemurl = '%s?action=%s&title=%s&url=%s&thumbnail=%s&plot=%s&extra=%s&page=%s' % ( sys.argv[ 0 ] , action , quote_plus( title ) , quote_plus(url) , quote_plus( thumbnail ) , quote_plus( plot ) , quote_plus( extra ) , quote_plus( page ))
-        xbmcplugin.addDirectoryItem( handle=int(sys.argv[1]), url=itemurl, listitem=listitem, isFolder=folder)
 
+    itemurl = '%s?%s' %(sys.argv[ 0 ], urlencode(kwargs) if b64 == False else quote_plus(six.ensure_text(base64.b64encode(six.ensure_binary(urlencode(kwargs))))))
+    xbmcplugin.addDirectoryItem( handle=int(sys.argv[1]), url=itemurl, listitem=listitem, isFolder=kwargs.get('folder') if kwargs.get('folder') != None else False if kwargs.get('isPlayable') and kwargs.get('isPlayable') == True else True)
+    if kwargs.get('sort'):
+        xbmcplugin.addSortMethod(int(sys.argv[1]), xbmcplugin.SORT_METHOD_LABEL_IGNORE_THE)
 def close_item_list():
     _log("close_item_list")
 
@@ -579,13 +600,5 @@ def set_view(view_mode, view_code=0):
     except:
         _log("Unable to find view code for view mode "+str(view_mode)+" and skin "+skin_name)
 
-f = open( os.path.join( os.path.dirname(__file__) , "addon.xml") )
-data = f.read()
-f.close()
-
-addon_id = find_single_match(data,'id="([^"]+)"')
-if addon_id=="":
-    addon_id = find_single_match(data,"id='([^']+)'")
-
-__settings__ = xbmcaddon.Addon(id=addon_id)
+__settings__ = xbmcaddon.Addon()
 __language__ = __settings__.getLocalizedString
